@@ -26,6 +26,7 @@
 #include "maidsafe/common/rsa.h"
 #include "maidsafe/common/test.h"
 #include "maidsafe/common/utils.h"
+#include "maidsafe/common/convert.h"
 #include "maidsafe/common/make_unique.h"
 #include "maidsafe/common/data_types/immutable_data.h"
 
@@ -87,6 +88,35 @@ class SentinelTest : public testing::Test {
                        MessageTypeTag::GetClientKeyResponse);
   }
 
+  SentinelAddInfo CreateFindGroupResponse(const passport::Maid& maid, MessageId message_id,
+        std::vector<passport::Pmid>& pmids, passport::Pmid& pmid) {
+    std::vector<passport::PublicPmid> public_pmids;
+    for (const auto& pmid : pmids)
+      public_pmids.push_back(passport::PublicPmid(pmid));
+    FindGroupResponse find_group_response(Address(pmid.name()), public_pmids);
+    return MakeAddInfo(find_group_response,
+                       pmid.private_key(),
+                       DestinationAddress(std::make_pair(Destination(maid.name()), boost::none)),
+                       SourceAddress(NodeAddress(Identity(pmid.name())),
+                                     GroupAddress(maid.name()), boost::none),
+                       message_id, Authority::client_manager,
+                       MessageTypeTag::FindGroupResponse);
+  }
+
+  std::vector<SentinelAddInfo> CreateFindGroupResponseKeys(MessageId message_id,
+                                                           const GroupAddress& target,
+                                                           const GroupAddress& source,
+                                                           Authority authority,
+                                                           std::vector<passport::Pmid> pmids) {
+    std::map<Address, asymm::PublicKey> public_key_map;
+    for (size_t index(0); index < GroupSize; ++index)
+      public_key_map.insert(std::make_pair(Address(Identity(pmids.at(index).name())),
+                                           pmids.at(index).public_key()));
+    GetGroupKeyResponse get_group_key_response(public_key_map, target);
+    return CreateGroupMessage(get_group_key_response, message_id, authority,
+                              MessageTypeTag::GetGroupKeyResponse, target, source);
+  }
+
   std::vector<SentinelAddInfo> CreateGetGroupKeyResponse(MessageId message_id,
                                                          const GroupAddress& target,
                                                          const GroupAddress& source,
@@ -137,6 +167,15 @@ class SentinelTest : public testing::Test {
               [&](const passport::Pmid& lhs, const passport::Pmid& rhs) {
                 return CloserToTarget(Identity(lhs.name()), Identity(rhs.name()), target);
               });
+  }
+
+  template <size_t N>
+  std::vector<passport::Pmid> GetFrontPmids() {
+    std::vector<passport::Pmid> pmids;
+    size_t size(pmid_nodes_.size() < N ? pmid_nodes_.size() : N);
+    for (size_t i = 0; i != size; ++i)
+      pmids.push_back(pmid_nodes_[i]);
+    return pmids;
   }
 
   std::unique_ptr<Sentinel> sentinel_;
@@ -213,6 +252,46 @@ TEST_F(SentinelTest, FUNC_BasicGroupAdd) {
   if (!resolved)
     EXPECT_TRUE(false);
 }
+
+TEST_F(SentinelTest, BEH_FindGroupResponse) {
+  CreateMaidKeys(1);
+  CreatePmidKeys(GroupSize * 4);
+
+  SortPmidNodes(Address(maid_nodes_.at(0).name()));
+  auto sorted_pmids(GetFrontPmids<GroupSize>());
+  std::vector<std::vector<passport::Pmid>> pmids;
+
+  for (size_t i = 0; i != sorted_pmids.size(); ++i) {
+    SortPmidNodes(Address(sorted_pmids[i].name()));
+    pmids.push_back(GetFrontPmids<GroupSize>());
+  }
+
+  MessageId message_id(RandomUint32()), key_message_id(RandomUint32());
+  boost::optional<Sentinel::ResultType> resolved;
+  for (size_t i = 0; i != pmids.size(); ++i) {
+    auto keys_infos(CreateFindGroupResponseKeys(key_message_id,
+        GroupAddress(maid_nodes_.at(0).name()), GroupAddress(pmids.at(i).at(0).name()),
+        Authority::client_manager, pmids.at(i)));
+    for (const auto& key_info : keys_infos) {
+      resolved = sentinel_->Add(key_info.header, key_info.tag, key_info.serialised);
+      if (resolved)
+        EXPECT_TRUE(false);
+    }
+
+    auto info(CreateFindGroupResponse(
+        maid_nodes_.at(0), message_id, pmids.at(i), pmids.at(i).at(0)));
+    resolved = this->sentinel_->Add(info.header, info.tag, info.serialised);
+    if ((i != pmids.size() - 1) && resolved)
+      EXPECT_TRUE(false);
+
+    if ((i != pmids.size() - 1) && resolved)
+      EXPECT_TRUE(false);
+  }
+
+  if (!resolved)
+    EXPECT_TRUE(false);
+}
+
 
 class AccountTransfer : public AccountTransferInfo {
  public:

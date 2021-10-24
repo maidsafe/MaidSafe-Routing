@@ -96,7 +96,6 @@ using Endpoint = asio::ip::udp::endpoint;
 using Port = uint16_t;
 using SerialisedMessage = std::vector<byte>;
 using CloseGroupDifference = std::pair<std::vector<Address>, std::vector<Address>>;
-using PublicKeyId = std::pair<Address, asymm::PublicKey>;
 
 template <typename CompletionToken>
 using BootstrapHandlerHandler =
